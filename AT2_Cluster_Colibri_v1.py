@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -791,4 +791,4 @@ st.info(
        Serie festlegen und nicht mehr pro Maus verändern.
     """
 )
-```
+
