@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -10,21 +9,13 @@ from scipy.spatial import ConvexHull
 
 # ============================================================
 # 🐦 AT2 CLUSTER COLIBRI
+#
 # Kleine Kalibrierungs-App für DBSCAN
 #
-# Zweck:
-#   EPS und min_samples visuell kalibrieren,
-#   ohne die Hauptanalyse-App zu verändern.
-#
-# Eingabe:
-#   QuPath MASTER CSV
-#
-# Verwendung:
-#   1. CSV laden
-#   2. Image auswählen
-#   3. ROI auswählen
-#   4. EPS verschieben
-#   5. Cluster direkt kontrollieren
+# WICHTIG:
+# Die eigentliche Clusterlogik bleibt unverändert.
+# Erweiterung gegenüber der vorherigen Version:
+# Navigation durch alle Image + ROI Einheiten.
 # ============================================================
 
 
@@ -41,9 +32,9 @@ st.markdown(
     """
     **DBSCAN-Kalibrierung für AT2-Zellcluster**
 
-    Diese kleine App verändert **nicht** deine Hauptanalyse.
-    Sie dient ausschließlich dazu, einen biologisch plausiblen
-    `eps`-Wert und `min_samples` visuell festzulegen.
+    Mit dieser App kannst du deine komplette MASTER-CSV
+    Bild für Bild durchgehen und `eps` / `min_samples`
+    visuell kalibrieren.
     """
 )
 
@@ -184,6 +175,71 @@ for col in [
 
 
 # ============================================================
+# IMAGE + ROI EINHEITEN ERSTELLEN
+#
+# NEU:
+# Die komplette MASTER-CSV wird in einzelne
+# Image + ROI Einheiten aufgeteilt.
+# ============================================================
+
+units = []
+
+for image_name, image_group in df.groupby(
+    "Image",
+    sort=True
+):
+
+    for roi_id, roi_group in image_group.groupby(
+        "ROI_ID",
+        sort=True
+    ):
+
+        units.append(
+            (
+                str(image_name),
+                str(roi_id)
+            )
+        )
+
+
+total_units = len(units)
+
+
+if total_units == 0:
+
+    st.error(
+        "Keine Image/ROI-Einheiten gefunden."
+    )
+
+    st.stop()
+
+
+# ============================================================
+# SESSION STATE
+#
+# NEU:
+# Aktuelle Position wird gespeichert.
+#
+# Dadurch bleiben EPS und min_samples beim
+# Weiterblättern erhalten.
+# ============================================================
+
+if "colibri_index" not in st.session_state:
+
+    st.session_state.colibri_index = 0
+
+
+if "colibri_eps" not in st.session_state:
+
+    st.session_state.colibri_eps = 32.0
+
+
+if "colibri_min_samples" not in st.session_state:
+
+    st.session_state.colibri_min_samples = 3
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 
@@ -191,55 +247,77 @@ st.sidebar.header("🐦 Colibri Kalibrierung")
 
 
 # ============================================================
-# IMAGE AUSWÄHLEN
+# AKTUELLES IMAGE + ROI
 # ============================================================
 
-images = sorted(
-    df["Image"]
-    .dropna()
-    .astype(str)
-    .unique()
+current_index = (
+    st.session_state.colibri_index
 )
 
 
-selected_image = st.sidebar.selectbox(
-    "Bild / Image",
-    images
+current_image, current_roi = units[
+    current_index
+]
+
+
+# ============================================================
+# PARAMETER
+#
+# Die Werte bleiben über das Weiterblättern erhalten.
+# ============================================================
+
+st.sidebar.markdown("---")
+
+st.sidebar.subheader("🔵 DBSCAN")
+
+
+eps_um = st.sidebar.slider(
+    "EPS – maximaler Abstand (µm)",
+    min_value=5.0,
+    max_value=150.0,
+    value=float(
+        st.session_state.colibri_eps
+    ),
+    step=1.0
 )
 
+
+min_samples = st.sidebar.slider(
+    "min_samples",
+    min_value=2,
+    max_value=10,
+    value=int(
+        st.session_state.colibri_min_samples
+    ),
+    step=1
+)
+
+
+# Werte zurück in Session State schreiben
+
+st.session_state.colibri_eps = eps_um
+
+st.session_state.colibri_min_samples = min_samples
+
+
+# ============================================================
+# AKTUELLE EINHEIT
+# ============================================================
 
 image_df = df[
     df["Image"].astype(str)
-    == selected_image
+    == current_image
 ].copy()
-
-
-# ============================================================
-# ROI AUSWÄHLEN
-# ============================================================
-
-rois = sorted(
-    image_df["ROI_ID"]
-    .dropna()
-    .astype(str)
-    .unique()
-)
-
-
-selected_roi = st.sidebar.selectbox(
-    "ROI",
-    rois
-)
 
 
 roi_df = image_df[
     image_df["ROI_ID"].astype(str)
-    == selected_roi
+    == current_roi
 ].copy()
 
 
 # ============================================================
-# KALIBRIERUNG
+# KOORDINATEN
 # ============================================================
 
 if has_um:
@@ -262,6 +340,7 @@ if has_um:
 
     coordinate_mode = "X_um / Y_um"
 
+
 else:
 
     roi_df = roi_df.dropna(
@@ -270,6 +349,7 @@ else:
             "Y_pixel"
         ]
     )
+
 
     # --------------------------------------------------------
     # Pixelkalibrierung
@@ -289,18 +369,26 @@ else:
             "PixelHeight_um"
         ].dropna()
 
+
         if len(px_w) > 0:
+
             pixel_width = float(
                 px_w.iloc[0]
             )
+
         else:
+
             pixel_width = 0.2128
 
+
         if len(px_h) > 0:
+
             pixel_height = float(
                 px_h.iloc[0]
             )
+
         else:
+
             pixel_height = 0.2128
 
     else:
@@ -329,39 +417,16 @@ else:
         ]
     )
 
+
     coordinate_mode = (
         "X_pixel / Y_pixel → µm"
     )
 
 
 # ============================================================
-# PARAMETER
-# ============================================================
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("🔵 DBSCAN")
-
-
-eps_um = st.sidebar.slider(
-    "EPS – maximaler Abstand (µm)",
-    min_value=5.0,
-    max_value=150.0,
-    value=50.0,
-    step=1.0
-)
-
-
-min_samples = st.sidebar.slider(
-    "min_samples",
-    min_value=2,
-    max_value=10,
-    value=3,
-    step=1
-)
-
-
-# ============================================================
 # DBSCAN
+#
+# UNVERÄNDERT
 # ============================================================
 
 if len(xy) >= 2:
@@ -370,6 +435,7 @@ if len(xy) >= 2:
         eps=float(eps_um),
         min_samples=int(min_samples)
     )
+
 
     labels = dbscan.fit_predict(
         xy
@@ -385,6 +451,8 @@ else:
 
 # ============================================================
 # CLUSTER
+#
+# UNVERÄNDERT
 # ============================================================
 
 cluster_ids = sorted(
@@ -433,6 +501,8 @@ else:
 
 # ============================================================
 # CLUSTERGRÖSSEN
+#
+# UNVERÄNDERT
 # ============================================================
 
 cluster_sizes = []
@@ -469,12 +539,24 @@ else:
 # ============================================================
 
 st.subheader(
-    f"🔬 {selected_image}  |  ROI {selected_roi}"
+    f"🔬 {current_image}  |  ROI {current_roi}"
+)
+
+
+# ============================================================
+# FORTSCHRITT
+# ============================================================
+
+st.progress(
+    (current_index + 1)
+    /
+    total_units
 )
 
 
 st.caption(
-    f"Koordinaten: {coordinate_mode}"
+    f"Bild/ROI {current_index + 1} von {total_units}"
+    f"   |   Koordinaten: {coordinate_mode}"
 )
 
 
@@ -523,6 +605,8 @@ c5.metric(
 
 # ============================================================
 # PLOT
+#
+# UNVERÄNDERT
 # ============================================================
 
 st.markdown("---")
@@ -585,9 +669,11 @@ for cluster_id in cluster_ids:
                 points
             )
 
+
             hull_points = points[
                 hull.vertices
             ]
+
 
             hull_points = np.vstack(
                 [
@@ -595,6 +681,7 @@ for cluster_id in cluster_ids:
                     hull_points[0]
                 ]
             )
+
 
             ax.plot(
                 hull_points[:, 0],
@@ -618,6 +705,7 @@ ax.set_xlabel(
 ax.set_ylabel(
     "Y (µm)"
 )
+
 
 ax.set_title(
     f"DBSCAN: EPS = {eps_um:.0f} µm | "
@@ -648,6 +736,8 @@ st.pyplot(
 
 # ============================================================
 # CLUSTERDETAILS
+#
+# UNVERÄNDERT
 # ============================================================
 
 st.markdown("---")
@@ -726,6 +816,136 @@ else:
 
 
 # ============================================================
+# NAVIGATION
+#
+# NEU
+# ============================================================
+
+st.markdown("---")
+
+st.subheader(
+    "🐦 Colibri-Rundflug"
+)
+
+
+nav1, nav2, nav3, nav4 = st.columns(
+    4
+)
+
+
+# ------------------------------------------------------------
+# ZURÜCK
+# ------------------------------------------------------------
+
+with nav1:
+
+    if st.button(
+        "⬅️ Vorheriges",
+        use_container_width=True,
+        disabled=(
+            current_index == 0
+        )
+    ):
+
+        st.session_state.colibri_index -= 1
+
+        st.rerun()
+
+
+# ------------------------------------------------------------
+# NÄCHSTES
+# ------------------------------------------------------------
+
+with nav2:
+
+    if st.button(
+        "➡️ Nächstes Bild",
+        use_container_width=True,
+        disabled=(
+            current_index >=
+            total_units - 1
+        )
+    ):
+
+        st.session_state.colibri_index += 1
+
+        st.rerun()
+
+
+# ------------------------------------------------------------
+# ZUM ANFANG
+# ------------------------------------------------------------
+
+with nav3:
+
+    if st.button(
+        "⏮️ Zum Anfang",
+        use_container_width=True
+    ):
+
+        st.session_state.colibri_index = 0
+
+        st.rerun()
+
+
+# ------------------------------------------------------------
+# ENDE
+# ------------------------------------------------------------
+
+with nav4:
+
+    if st.button(
+        "⏭️ Zum letzten Bild",
+        use_container_width=True
+    ):
+
+        st.session_state.colibri_index = (
+            total_units - 1
+        )
+
+        st.rerun()
+
+
+# ============================================================
+# DIREKTE AUSWAHL
+# ============================================================
+
+st.markdown("---")
+
+st.subheader(
+    "🔢 Direkt zu Image / ROI"
+)
+
+
+jump_options = [
+    f"{i + 1}: {img} | ROI {roi}"
+    for i, (img, roi)
+    in enumerate(units)
+]
+
+
+selected_jump = st.selectbox(
+    "Einheit auswählen",
+    jump_options,
+    index=current_index
+)
+
+
+jump_index = jump_options.index(
+    selected_jump
+)
+
+
+if jump_index != current_index:
+
+    st.session_state.colibri_index = (
+        jump_index
+    )
+
+    st.rerun()
+
+
+# ============================================================
 # AKTUELLEN PARAMETER ANZEIGEN
 # ============================================================
 
@@ -740,17 +960,17 @@ st.code(
     f"""
 AT2 Cluster Calibration
 
-Image:
-{selected_image}
-
-ROI:
-{selected_roi}
-
 EPS:
 {eps_um:.1f} µm
 
 min_samples:
 {min_samples}
+
+Aktuelles Image:
+{current_image}
+
+Aktuelle ROI:
+{current_roi}
 
 AT2 gesamt:
 {total_count}
@@ -780,15 +1000,28 @@ Median AT2 / Cluster:
 
 st.info(
     """
-    💡 **Workflow**
+    💡 **Kalibrierungs-Workflow**
 
-    1. Repräsentatives Bild auswählen.
-    2. EPS langsam verändern.
-    3. Prüfen, ob die markierten Gruppen deiner
-       biologischen Definition eines AT2-Clusters entsprechen.
-    4. Dasselbe mit mehreren repräsentativen Bildern prüfen.
-    5. EPS und min_samples anschließend für die komplette
-       Serie festlegen und nicht mehr pro Maus verändern.
+    Du kannst jetzt die komplette MASTER-CSV Bild für Bild
+    durchgehen.
+
+    Der EPS- und min_samples-Wert bleibt beim Wechsel
+    zwischen den Bildern erhalten.
+
+    So kannst du zum Beispiel:
+
+    Bild 1 → EPS einstellen
+    Bild 2 → prüfen
+    Bild 3 → eventuell korrigieren
+    Bild 4 → prüfen
+    ...
+
+    Wenn du mit dem Wert zufrieden bist, verwendest du
+    diesen festen Parameter anschließend in deiner
+    Hauptanalyse für die komplette Serie.
+
+    ⚠️ Den EPS-Wert nicht pro Maus oder Gruppe optimieren.
+    Ein einmal festgelegter Wert sollte für die komplette
+    Serie unverändert bleiben.
     """
 )
-
