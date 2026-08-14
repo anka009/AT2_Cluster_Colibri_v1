@@ -273,8 +273,8 @@ st.sidebar.subheader("🔵 DBSCAN")
 
 eps_um = st.sidebar.slider(
     "EPS – maximaler Abstand (µm)",
-    min_value=5.0,
-    max_value=150.0,
+    min_value=1.0,
+    max_value=100.0,
     value=float(
         st.session_state.colibri_eps
     ),
