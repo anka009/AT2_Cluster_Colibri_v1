@@ -231,7 +231,7 @@ if "colibri_index" not in st.session_state:
 
 if "colibri_eps" not in st.session_state:
 
-    st.session_state.colibri_eps = 32.0
+    st.session_state.colibri_eps = 12.0
 
 
 if "colibri_min_samples" not in st.session_state:
